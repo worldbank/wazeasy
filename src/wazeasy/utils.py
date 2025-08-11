@@ -12,7 +12,7 @@ import h3
 from dask import delayed, compute
 
 
-def load_data(main_path, year, month, sotrage_options = None, file_type = 'csv'):
+def load_data(main_path, year, month, storage_options = None, file_type = 'csv'):
     '''
     Load data from a specified path for a given year and month.
 
@@ -27,14 +27,26 @@ def load_data(main_path, year, month, sotrage_options = None, file_type = 'csv')
     - DataFrame: A Dask DataFrame containing the loaded data.
     '''
     if file_type == 'csv':
-        load_data_csv(main_path, year, month)
+        return load_data_csv(main_path, year, month, storage_options)
     elif file_type == 'parquet':
-        load_data_parquet(main_path, year, month, sotrage_options)
+        return load_data_parquet(main_path, year, month, storage_options)
 
-#TODO write function for reading cvs files into dask data frame
-# def load_data_csv(main_path, year, month):
-#     # TBD
-#     return 
+def load_data_csv(main_path, year, month, storage_options=None):
+    '''
+    Load CSV data from a specified path for a given year and month.
+
+    Parameters:
+    - main_path (str): The main directory path where CSV files are stored.
+    - year (int): The year of the data to load.
+    - month (int): The month of the data to load.
+    - storage_options (dict, optional): Options for storage backends, e.g., for cloud storage.
+
+    Returns:
+    - DataFrame: A Dask DataFrame containing the loaded CSV data.
+    '''
+    path = main_path + 'year={}/month={}/*.csv'.format(year, month)
+    df = dd.read_csv(path, storage_options=storage_options)
+    return df
 
 def load_data_parquet(main_path, year, month, storage_options):
     '''
@@ -55,7 +67,12 @@ def load_data_parquet(main_path, year, month, storage_options):
 
 def handle_time(df, utc_region, parquet = False):
     '''
-    Handle time column to ensure it is in the correct UTC and calculate useful time attributes.
+    Handle time column to ensure it is in the correct UTC and calculate the following time-related attributes:
+    - year: Year of the record (numeric).
+    - month: Month of the record (numeric, 1–12).
+    - date: Calendar date (YYYY-MM-DD).
+    - hour: Hour of the day in 24-hour format.
+    - local_time: Timestamp converted to the specified UTC region.
 
     Parameters:
     - df (DataFrame): The DataFrame containing the data.
@@ -87,7 +104,7 @@ def assign_geography_to_jams(ddf):
 
 def remove_level5(ddf):
     '''
-    Remove traffic jams with level 5 from the DataFrame.
+    Remove traffic jams with level 5 from the DataFrame as these jams are associated to road closures.
 
     Parameters:
     - ddf (DataFrame): The Dask DataFrame containing traffic jam data.
@@ -121,8 +138,8 @@ def tci_by_period_geography(ddf, period, geography, agg_column, dow = None, cust
     - period (list): The period over which to aggregate data.
     - geography (list): The geographical areas to consider.
     - agg_column (str): The column to aggregate.
-    - dow (list, optional): Days of the week to consider (0 = Monday, 6 = Sunday).
-    - custom_dates (list, optional): Specific dates to consider.
+    - dow (list, optional): Days of the week to consider (0 = Monday, 6 = Sunday). If provided, filtering by this parameter is applied first.
+    - custom_dates (list, optional): Specific dates to consider. Only applied if 'dow' is not provided.
 
     Returns:
     - DataFrame: A DataFrame with the TCI calculated.
@@ -140,7 +157,7 @@ def tci_by_period_geography(ddf, period, geography, agg_column, dow = None, cust
 
 def mean_hourly_tci(ddf, period, geog, agg_column, dates_of_interest):
     '''
-    Calculate the mean Traffic Congestion Index (TCI) across the dates of interest.
+    Calculate the mean Traffic Congestion Index (TCI)'s hourly distribution considering only the dates of interest.
 
     Parameters:
     - ddf (DataFrame): The Dask DataFrame containing traffic jam data.
@@ -161,6 +178,7 @@ def mean_hourly_tci(ddf, period, geog, agg_column, dates_of_interest):
     return daily_tci.groupby(geog + ['hour'])['tci'].mean()
 
 def mean_tci_geog(ddf, period, geog_id, dates, geogs, agg_column, projected_crs):
+    #TODO: Consider replacing the overlay by assigning each jam segment (Not the complete Linestring but the different pieces of the Linestring) to each hexagon/geography based on the starting point of it. 
     '''
     Average the Traffic Congestion Index (TCI) for each geography across a period of time.
 
@@ -206,7 +224,7 @@ def filter_date_range_by_dow(date_range, dow):
 
 def monthly_hourly_tci(ddf, geog, period, year, month, agg_column, dow = None):
     '''
-    Calculate the monthly Traffic Congestion Index (TCI).
+    Calculate the monthly Traffic Congestion Index (TCI) hourly distributed.
 
     Parameters:
     - ddf (DataFrame): The Dask DataFrame containing traffic jam data.
@@ -228,7 +246,6 @@ def monthly_hourly_tci(ddf, geog, period, year, month, agg_column, dow = None):
     date_range = pd.date_range(start_date, end_date)
     dates_of_interest = filter_date_range_by_dow(date_range, dow)    
     return mean_hourly_tci(ddf, period, geog, agg_column, dates_of_interest)
-
    
 def create_gdf(ddf):
     '''

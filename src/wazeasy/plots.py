@@ -90,7 +90,7 @@ def jams_monthly_aggregated(data, save_fig = False):
 
 def regional_tci_per_day(data, save_fig = False):
     '''
-    Plot the daily Traffic Congestion Index (TCI) aggregated by region.
+    Plot the daily regional Traffic Congestion Index (TCI), aggregated at the area of operation level.
 
     Parameters:
     - data (DataFrame): A Dask or Pandas DataFrame containing 'date', 'region', and 'length' columns.
