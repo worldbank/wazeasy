@@ -139,7 +139,7 @@ def tci_by_period_geography(ddf, period, geography, agg_column, dow = None, cust
     - geography (list): The geographical areas to consider.
     - agg_column (str): The column to aggregate.
     - dow (list, optional): Days of the week to consider (0 = Monday, 6 = Sunday). If provided, filtering by this parameter is applied first.
-    - custom_dates (list, optional): Specific dates to consider. Only applied if 'dow' is not provided.
+    - custom_dates (list, optional): Specific dates to consider. If provided, filtering by this parameter is applied after filtering by dow (if dow is provided).
 
     Returns:
     - DataFrame: A DataFrame with the TCI calculated.
@@ -148,7 +148,7 @@ def tci_by_period_geography(ddf, period, geography, agg_column, dow = None, cust
         unique_dates = ddf[["date"]].drop_duplicates().compute()['date'].values
         filtered_dates = filter_date_range_by_dow(unique_dates, dow)        
         ddf = ddf[ddf['date'].isin(filtered_dates)]
-    elif custom_dates is not None:
+    if custom_dates is not None:
         ddf = ddf[ddf['date'].isin(custom_dates)]
 
     tci = ddf.groupby(period + geography)[[agg_column]].sum().compute()  
