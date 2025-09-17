@@ -170,7 +170,7 @@ def mean_hourly_tci(ddf, period, geog, agg_column, dates_of_interest):
     - Series: A Series with the mean TCI for each hour.
     '''
     daily_tci = tci_by_period_geography(ddf, period, geog, agg_column)
-    geogs = list(set(daily_tci.reset_index()[geog])) 
+    geogs = list(set(daily_tci.reset_index()[geog[0]])) 
     idxs = pd.MultiIndex.from_tuples(list(itertools.product(dates_of_interest, list(range(24)), geogs)),
                                      names = period + geog)
     daily_tci = daily_tci.reindex(idxs, fill_value = 0)
@@ -412,3 +412,17 @@ def distribute_jams_over_aggregation_geom(gddf, ddf, projected_crs):
     merge = ddf.merge(df, left_on = 'geoWKT', right_on = 'geoWKT', how = 'left')   
     return merge
 
+def classify_jam_by_region(ddf, geogs, year, month, projected_crs, dow = None):
+    '''It is important to filter the dataset as much as it can be filtered before the spatial operation'''
+    start_date = dt(year, month, 1)
+    if month == 12:
+        end_date = dt(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        end_date = dt(year, month + 1, 1) - timedelta(days=1)
+    date_range = [x.date() for x in pd.date_range(start_date, end_date)]
+    dates_of_interest = filter_date_range_by_dow(date_range, dow)
+    
+    ddf_filtered = ddf[ddf['date'].isin(dates_of_interest)].copy()
+    unique_jams_over_agg_geom = parallelized_overlay(ddf_filtered, geogs)
+    jams_over_agg_geom = distribute_jams_over_aggregation_geom(unique_jams_over_agg_geom, ddf_filtered, projected_crs)    
+    return jams_over_agg_geom

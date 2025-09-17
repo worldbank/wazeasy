@@ -140,5 +140,36 @@ def hourly_tci_by_month (ddf, geog, combination_year_month, dow, group_name, sav
     fig.show()
     # TODO: implement the save_fig option. Plotly has options for saving static and interactive figures. 
 
+def hourly_tci_by_geog(ddf, geogs, geog, year, month, agg_column, dow, group_name, projected_crs, save_fig = False):
+    '''
+    Plot the hourly Traffic Congestion Index (TCI)(monthly averaged) by geography.
 
+    Parameters:
+    - ddf (DataFrame): A Dask DataFrame containing traffic data.
+    - geogs: GeoDataFrame with geographies where to calculate the TCI.
+    - geog (str): The geographic column to group by.
+    - combination_year_month (list of tuples): List of (year, month) pairs to plot.
+    - dow (list): Days of the week to include (e.g. [0, 1, 2, 3, 4] for weekdays).
+    - group_name (str): Label used in the plot title.
+    - save_fig (bool): Unused currently. Reserved for future implementation.
+
+    Returns:
+    - None: Displays the interactive Plotly figure.
+    '''
+    ddf_month = utils.classify_jam_by_region(ddf, geogs, year, month, projected_crs, dow)
+    hourly_tci = utils.monthly_hourly_tci(ddf_month, geog, ['date', 'hour'], year, month, agg_column, dow).reset_index()
+    unique_geogs = hourly_tci[geog[0]].unique()
+    
+    fig = go.Figure()
+    
+    for g in unique_geogs:
+        data = hourly_tci[hourly_tci[geog[0]]==g]
+        fig.add_trace(go.Scatter(x=data.hour, y=data.tci, mode='lines', name=g, visible=True))
+        # import pdb; pdb.set_trace()
+    fig.update_layout(title=f'Monthly Hourly TCI - {group_name}', 
+                      xaxis_title='Hour', 
+                      yaxis_title='TCI', 
+                      legend_title='Dates', 
+                      hovermode='x unified') 
+    fig.show()
 
