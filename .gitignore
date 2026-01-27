@@ -95,3 +95,6 @@ _build/
 src/*/_version.py
 
 /data
+
+# File extensions
+*.rst 
