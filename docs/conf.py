@@ -28,7 +28,7 @@ extensions = [
 external_toc_exclude_missing = False
 external_toc_path = "_toc.yml"
 extra_extensions = ["sphinxcontrib.apidoc"]
-html_baseurl = "https://datapartnership.github.io/mobilyze"
+html_baseurl = "https://worldbank.github.io/wazeasy"
 html_favicon = "images/favicon.ico"
 html_last_updated_fmt = "%b %d, %Y"
 html_logo = "images/logo.png"
@@ -45,7 +45,7 @@ html_theme_options = {
         "colab_url": "",
     },
     "path_to_docs": "",
-    "repository_url": "https://github.com/datapartnership/mobilyze",
+    "repository_url": "https://github.com/worldbank/wazeasy",
     "repository_branch": "main",
     "extra_footer": "",
     "home_page_in_toc": False,

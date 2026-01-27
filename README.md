@@ -1,6 +1,34 @@
 # Wazeasy: Waze Data Analysis
-**Wazeasy** is a Python package currently in development, designed to process and analyze waze jams data. It does geospatial transformations on the dataset to generate the number of jams per road segement, and plots the resulting data. 
+**Wazeasy** is a Python package currently under development, designed to process and analyze Waze's data. It will help you create the most common analyisis like number of jams per day and level, congestion by h3 levels, etc.
 
+![Number of Jams per Day](./images/jams_per_day.png)
+
+## Getting Started
+### Installation
+
+Since Wazeasy is not yet available on PyPI, you can install it directly from the repository:
+
+```bash
+git clone https://github.com/worldbank/wazeasy.git
+cd wazeasy
+pip install -e .
+```
+
+### Quick Start
+
+```python
+import wazeasy
+
+# Your analysis code here
+```
+
+## Documentation
+Documentation can be found [here](https://worldbank.github.io/wazeasy/api/wazeasy.html)
+
+## Contact Information
+For questions, feedback, or contributions, please contact the Development Data Partnership: datalab@worldbank.org
+GitHub Issues: github@worldbank.org
+You can also open an issue in the [GitHub repository](https://github.com/worldbank/wazeasy/issues).
 
 ## License
 
