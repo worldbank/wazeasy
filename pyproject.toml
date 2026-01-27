@@ -47,6 +47,8 @@ dependencies = [
     "geopandas",
     "dask-geopandas",
     "shapely",
+	"h3",
+	"seaborn",
 ]
 [dependency-groups]
 dev = [
