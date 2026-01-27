@@ -4,10 +4,10 @@ root: README
 parts:
   - caption: API Reference
     chapters:
-      - file: api/wazeasy
+      - file: api/wazeasy.rst
         sections:
-          - file: api/wazeasy.plots
-          - file: api/wazeasy.utils
+          - file: api/wazeasy.plots.rst
+          - file: api/wazeasy.utils.rst
       
   - caption: Examples
     chapters:
