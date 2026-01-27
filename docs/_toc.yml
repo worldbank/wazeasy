@@ -5,6 +5,9 @@ parts:
   - caption: API Reference
     chapters:
       - file: api/wazeasy
+        sections:
+          - file: api/wazeasy.plots
+          - file: api/wazeasy.utils
       
   - caption: Examples
     chapters:
