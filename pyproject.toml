@@ -42,6 +42,11 @@ dependencies = [
 	"tqdm>=4.67.1",
 	"xarray>=0.7.0",
 	"dask",
+    "pyarrow",
+    "plotly",
+    "geopandas",
+    "dask-geopandas",
+    "shapely",
 ]
 [dependency-groups]
 dev = [
