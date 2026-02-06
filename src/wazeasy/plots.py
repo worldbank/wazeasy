@@ -173,3 +173,47 @@ def hourly_tci_by_geog(ddf, geogs, geog, year, month, agg_column, dow, group_nam
                       hovermode='x unified') 
     fig.show()
 
+def plot_longitudinal_tci(tci_all):
+    '''
+    Plots the longitudinal tci per day. 
+
+    Parameters:
+    tci_all = DataFrame, must have a column named tci and date
+
+    Returns:
+    Plot
+    '''
+    tci_all.sort_values('date', inplace = True)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=tci_all.date, y=tci_all.tci, mode='lines', name='test', visible=True))
+    fig.update_layout(title=f'Daily TCI in Sarbagita', 
+                      xaxis_title='Date', 
+                      yaxis_title='TCI', 
+                      hovermode='x unified') 
+    fig.show()
+
+def plot_year_to_year_tci(tci_all):
+    '''
+    Generates a lineplot per year to compare tci during the same periods of time
+
+    Parameter:
+    tci_all: DataFrame, must have a column named tci and date
+
+    Returns:
+    Line plots
+    '''
+    tci_all['year'] = tci_all['date'].apply(lambda x: x.year)
+    tci_all['month'] = tci_all['date'].apply(lambda x: x.month)
+    month_tci = tci_all.groupby(['year', 'month'])['tci'].sum().reset_index()
+    # month_tci['datetime'] = pd.to_datetime(month_tci[['year', 'month']].assign(day=1))
+    fig = go.Figure()
+
+    for year in range(2020, 2026):
+        data = month_tci[month_tci['year']==year]
+        fig.add_trace(go.Scatter(x=data.month, y=data.tci, mode='lines', name=year, visible=True))
+        fig.update_layout(title=f'Monthly TCI', 
+                          xaxis_title='Month', 
+                          yaxis_title='TCI', 
+                          legend_title='Years', 
+                          hovermode='x unified') 
+    fig.show()
