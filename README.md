@@ -28,7 +28,7 @@ Documentation for this package can be found [here](https://worldbank.github.io/w
 ## Contact 
 
 For questions, feedback, or contributions, please contact:
-- Development Data Partnership: datalab@worldbank.org
+- Development Data Partnership: datapartnership@worldbank.org
 - GitHub Issues: github@worldbank.org
 
 You can also open an issue in the [GitHub repository](https://github.com/worldbank/wazeasy/issues).
