@@ -426,3 +426,44 @@ def classify_jam_by_region(ddf, geogs, year, month, projected_crs, dow = None):
     unique_jams_over_agg_geom = parallelized_overlay(ddf_filtered, geogs)
     jams_over_agg_geom = distribute_jams_over_aggregation_geom(unique_jams_over_agg_geom, ddf_filtered, projected_crs)    
     return jams_over_agg_geom
+
+def create_gdf_start_point(ddf):
+    '''
+    Create a Dask-Geopandas GeoDataFrame from a Dask DataFrame using the start
+    point from the jam as the geometry
+
+    Parameters:
+    - ddf (DataFrame): The Dask DataFrame containing geographical data.
+
+    Returns:
+    - GeoDataFrame: A GeoDataFrame with the geometry column set.
+    '''
+    ddf['geoWKT_point'] = 'POINT (' + ddf['geoWKT'].str.split(', ').str[-1].str.replace(')', '', regex=False) + ')'
+    ddf['geometry'] = dask_geopandas.from_wkt(ddf['geoWKT_point'], crs='epsg:4326')
+    gddf = dask_geopandas.from_dask_dataframe(ddf, geometry='geometry')
+    gddf = gddf.set_crs("EPSG:4326")
+    return gddf
+
+def filter_points_in_area(gddf_points, gdf_area):
+    """
+    Filter dask geodataframe points that lie within geopandas area geometries.
+    
+    Parameters:
+    - gddf_points: Dask GeoDataFrame with Point geometries
+    - gdf_area: Geopandas GeoDataFrame with area geometries (Polygon/MultiPolygon)
+    
+    Returns:
+    - Filtered Dask GeoDataFrame with points inside the areas
+    """
+    # Ensure both have the same CRS
+    if gddf_points.crs != gdf_area.crs:
+        gdf_area = gdf_area.to_crs(gddf_points.crs)
+    
+    # Perform spatial join - keeps points that intersect with areas
+    result = dask_geopandas.sjoin(gddf_points, gdf_area, how='inner', predicate='within')
+    
+    # Remove the extra columns from the area dataframe if not needed
+    original_columns = gddf_points.columns.tolist()
+    result = result[original_columns + ['Region']]
+    
+    return result
