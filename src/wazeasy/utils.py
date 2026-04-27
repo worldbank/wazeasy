@@ -113,7 +113,7 @@ def assign_geography_to_jams(df, geog_info = None):
         if is_dask_dataframe(df):
             gddf_points = create_dask_gdf_start_point(df)
             for region_name, gdf_area in geog_info.items():
-                    gddf_points = sjoin_with_h3_dask(gddf_points, gdf_area, polygon_id_col='Region')
+                    gddf_points = sjoin_with_dask(gddf_points, gdf_area, polygon_id_col='Region')
                     gddf_points = gddf_points.rename(columns = {'Region': region_name})
             return gddf_points
         else:
@@ -374,14 +374,10 @@ def process_geowkt_partition(partition):
     """Process a partition using vectorized pandas operations"""
     return 'POINT (' + partition.str.split(', ').str[-1].str.replace(')', '', regex=False) + ')'
 
-def sjoin_with_h3_dask(gddf_points, gdf_polygons, polygon_id_col='Region'):
+def sjoin_with_dask(gddf_points, gdf_polygons, polygon_id_col='Region'):
     '''
-    Assign points to polygons via H3 hexagon centroids at resolution 15.
-    
-    This function:
-    1. Converts each point to its H3 hexagon ID at level 15
-    2. Gets the centroid of each H3 hexagon
-    3. Performs spatial join to find which polygon each centroid belongs to
+    Assign points to polygons. Dask does not have a function for left spatial join, so we need 
+    to do it manually. 
     
     Parameters:
     - gddf_points (GeoDataFrame): Dask GeoDataFrame with Point geometries 
@@ -391,65 +387,15 @@ def sjoin_with_h3_dask(gddf_points, gdf_polygons, polygon_id_col='Region'):
     Returns:
     - GeoDataFrame: Original points with h3_id and polygon assignment columns
     '''
-    if not ('h3_id' in gddf_points.columns):
-        # Ensure points are in WGS84 for H3 operations
-        if gddf_points.crs != 'EPSG:4326':
-            points_wgs84 = gddf_points.to_crs('EPSG:4326')
-        else:
-            points_wgs84 = gddf_points.copy()
-        
-        # Convert points to H3 hexagon IDs at level 15
-        def point_to_h3(point):
-            return h3.latlng_to_cell(point.y, point.x, 15)
-
-        points_wgs84['h3_id'] = points_wgs84.geometry.apply(lambda x: point_to_h3(x), meta=('h3_id', 'string[pyarrow]'))
-    else:
-        points_wgs84 = gddf_points.copy()
     
-    # Get unique H3 hexagon IDs and their centroids
-    unique_h3_ids = points_wgs84['h3_id'].unique()
-    
-    # Vectorized creation of H3 centroids
-    # Convert H3 IDs to lat/lng coordinates in batch
-    coords = [h3.cell_to_latlng(h3_id) for h3_id in unique_h3_ids]
-    
-    # Create Points using vectorized operations
-
-    from shapely import Point
-    centroids_array = [Point(x, y) for y, x in coords]
-    
-    # Create GeoDataFrame of H3 centroids
-    gdf_centroids = gpd.GeoDataFrame({
-        'h3_id': unique_h3_ids,
-        'geometry': centroids_array
-    }, crs='EPSG:4326')
-    
-    # Ensure polygon layer is in same CRS
-    if gdf_polygons.crs != 'EPSG:4326':
-        polygons_wgs84 = gdf_polygons.to_crs('EPSG:4326')
-    else:
-        polygons_wgs84 = gdf_polygons.copy()
-    
-    # Spatial join: find which polygon each H3 centroid belongs to
-    centroids_with_polygons = gpd.sjoin(
-        gdf_centroids, 
-        polygons_wgs84[[polygon_id_col, 'geometry']], 
-        how='left', 
-        predicate='within'
-    )
-
-    # Merge back to original points
-    result = points_wgs84.merge(
-        centroids_with_polygons[['h3_id', polygon_id_col]], 
-        on='h3_id', 
-        how='left'
-    )
-
-    # Convert back to original CRS if needed
     if gddf_points.crs != 'EPSG:4326':
-        result = result.to_crs(gddf_points.crs)
+            gddf_points = gddf_points.to_crs('EPSG:4326')
+    if gdf_polygons.crs != 'EPSG:4326':
+        gdf_polygons = gdf_polygons.to_crs('EPSG:4326')
 
-    return result
+    join = gddf_points.sjoin(gdf_polygons[[polygon_id_col, 'geometry']], how='inner', predicate='intersects')
+    gddf_points[polygon_id_col] = join[polygon_id_col]
+    return gddf_points
 
 
 ############ Old code ##############
