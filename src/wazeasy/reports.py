@@ -1,6 +1,4 @@
-
-import utils
-import plots
+from wazeasy import utils, plots
 import geopandas as gpd
 
 def run_basic_report(df, start_date = None, end_date = None):

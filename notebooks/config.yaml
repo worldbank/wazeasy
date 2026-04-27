@@ -4,13 +4,13 @@ Baghdad:
   geographies:
     'admin1':
       name: 'Administrative Level 1'
-      path: '~/Downloads/gadm41_IRQ_admin1.gpkg'
+      path: '../data/gadm41_IRQ_admin1.gpkg'
       plot_by_geography: True
     'admin2':
       name: 'Administrative Level 2'
-      path: '~/Downloads/gadm41_IRQ_admin2.gpkg'
+      path: '../data/gadm41_IRQ_admin2.gpkg'
       plot_by_geography: True
     'hex_id_7':
       name: 'Hexagons Level 7'
-      path: '~/Downloads/hexagons_level_7.gpkg'
+      path: '../data/hexagons_level_7.gpkg'
       plot_by_geography: False 

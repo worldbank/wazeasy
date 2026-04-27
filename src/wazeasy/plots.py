@@ -1,11 +1,10 @@
 from datetime import datetime as dt
 import itertools
 import pandas as pd
-import utils
+from wazeasy import utils
 import seaborn as sns
 import matplotlib.pyplot as plt
 sns.set()
-import plotly.graph_objects as go
 import altair as alt
 
 alt.data_transformers.enable('json')
