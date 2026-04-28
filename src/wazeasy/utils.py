@@ -5,12 +5,9 @@ from datetime import datetime as dt
 import dask.dataframe as dd
 import dask_geopandas
 import itertools
-from shapely import wkt, Polygon
-import json 
-import shapely
+from shapely import Point, Polygon
 import h3
-from h3 import LatLngPoly
-from dask import delayed, compute, utils
+
 
 def is_dask_dataframe(df):
     """Check if DataFrame is a Dask DataFrame."""
@@ -117,7 +114,12 @@ def assign_geography_to_jams(df, geog_info = None):
                     gddf_points = gddf_points.rename(columns = {'Region': region_name})
             return gddf_points
         else:
-            print('Todo do pandas version')
+            gdf_points = create_pandas_gdf_start_point(df)
+            for region_name, gdf_area in geog_info.items():
+                gdf_points = gpd.sjoin(gdf_points, gdf_area[['Region', 'geometry']], how='left', predicate='intersects')
+                gdf_points.drop(columns=['index_right'], inplace=True)
+                gdf_points = gdf_points.rename(columns = {'Region': region_name})
+            return gdf_points
 
 def remove_level5(ddf):
     '''
@@ -173,8 +175,10 @@ def tci_temporal_spatial(df, agg_temporal, agg_spatial, agg_column,
     '''    
     dates_of_interest = define_dates_of_interest(df, start_date, end_date, dow)
     df_filtered = df[df['date'].isin(dates_of_interest)].copy()
-
-    tci = df_filtered.groupby(agg_temporal + [agg_spatial])[[agg_column]].sum().compute()  
+    if is_dask_dataframe(df_filtered):
+        tci = df_filtered.groupby(agg_temporal + [agg_spatial])[[agg_column]].sum().compute()  
+    else:
+        tci = df_filtered.groupby(agg_temporal + [agg_spatial])[[agg_column]].sum()
     tci.rename(columns = {agg_column: 'tci'}, inplace = True)    
     return tci
 
@@ -185,7 +189,10 @@ def define_dates_of_interest(df, start_date = None, end_date = None, dow = None)
         if end_date is None:
             end_date = df['date'].max().compute().strftime('%Y-%m-%d')
     else:
-        print('Todo: do pandas version')
+        if start_date is None:
+            start_date = df['date'].min().strftime('%Y-%m-%d')
+        if end_date is None:
+            end_date = df['date'].max().strftime('%Y-%m-%d')
     
     if dow is None:
         dow = [0, 1, 2, 3, 4, 5, 6]
@@ -369,6 +376,22 @@ def create_dask_gdf_start_point(ddf):
     gddf = dask_geopandas.from_dask_dataframe(ddf, geometry='geometry')
     gddf = gddf.set_crs("EPSG:4326")
     return gddf
+
+def create_pandas_gdf_start_point(df):
+    '''
+    Create a GeoDataFrame from a DataFrame by using the last point from a LineString stored in WKT format as the geometry.
+
+    Parameters:
+    - df (DataFrame): The Pandascontaining WKT geometry in 'geoWKT' column.
+
+    Returns:
+    - GeoDataFrame: A GeoDataFrame with geometry set from the WKT column.
+    '''
+    lines_geometry = gpd.GeoSeries.from_wkt(df['geoWKT'], crs='epsg:4326')
+    points = lines_geometry.apply(lambda x: Point(x.coords[-1]))
+    df['geometry'] = points
+    gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='epsg:4326')
+    return gdf
 
 def process_geowkt_partition(partition):
     """Process a partition using vectorized pandas operations"""
