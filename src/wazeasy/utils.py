@@ -13,12 +13,13 @@ def is_dask_dataframe(df):
     """Check if DataFrame is a Dask DataFrame."""
     return isinstance(df, dd.DataFrame)
 
-def load_data(main_path, year, month, storage_options = None, file_type = 'csv'):
+def load_data(path, storage_options = None, 
+              file_type = 'csv', filter_level_5 = True, usecols = None):
     '''
     Load data from a specified path for a given year and month.
 
     Parameters:
-    - main_path (str): The main directory path where data files are stored.
+    - path (str): The main directory path where data files are stored.
     - year (int): The year of the data to load.
     - month (int): The month of the data to load.
     - storage_options (dict, optional): Options for storage backends, e.g., for cloud storage.
@@ -28,16 +29,17 @@ def load_data(main_path, year, month, storage_options = None, file_type = 'csv')
     - DataFrame: A Dask DataFrame containing the loaded data.
     '''
     if file_type == 'csv':
-        return load_data_csv(main_path, year, month, storage_options)
+        return load_data_csv(path, storage_options, filter_level_5, usecols = usecols)
     elif file_type == 'parquet':
-        return load_data_parquet(main_path, year, month, storage_options)
+        return load_data_parquet(path, storage_options, filter_level_5, usecols = usecols)
 
-def load_data_csv(main_path, year, month, storage_options=None):
+def load_data_csv(path, storage_options=None, 
+                  filter_level_5 = True, usecols = None):
     '''
     Load CSV data from a specified path for a given year and month.
 
     Parameters:
-    - main_path (str): The main directory path where CSV files are stored.
+    - path (str): The main directory path where CSV files are stored.
     - year (int): The year of the data to load.
     - month (int): The month of the data to load.
     - storage_options (dict, optional): Options for storage backends, e.g., for cloud storage.
@@ -45,16 +47,21 @@ def load_data_csv(main_path, year, month, storage_options=None):
     Returns:
     - DataFrame: A Dask DataFrame containing the loaded CSV data.
     '''
-    path = main_path + 'year={}/month={}/*.csv'.format(year, month)
-    df = dd.read_csv(path, storage_options=storage_options)
+    if usecols:
+        df = dd.read_csv(path, storage_options=storage_options, usecols=usecols)
+    else:
+        df = dd.read_csv(path, storage_options=storage_options)
+    if filter_level_5:
+        df = df[df['level']!=5]
     return df
 
-def load_data_parquet(main_path, year, month, storage_options):
+def load_data_parquet(path, storage_options, 
+                      filter_level_5 = True, usecols = None):
     '''
     Load parquet data from a specified path for a given year and month.
 
     Parameters:
-    - main_path (str): The main directory path where parquet files are stored.
+    - path (str): The main directory path where parquet files are stored.
     - year (int): The year of the data to load.
     - month (int): The month of the data to load.
     - storage_options (dict): Options for storage backends, e.g., for cloud storage.
@@ -62,8 +69,22 @@ def load_data_parquet(main_path, year, month, storage_options):
     Returns:
     - DataFrame: A Dask DataFrame containing the loaded parquet data.
     '''
-    path = main_path + 'year={}/month={}/*.parquet'.format(year, month)
-    df = dd.read_parquet(path, storage_options=storage_options, engine = 'pyarrow')
+
+    if filter_level_5:
+        filters = [('level', '!=', 5)]
+        if usecols:
+            df = dd.read_parquet(path, storage_options=storage_options,
+                                 filters = filters, columns = usecols, engine = 'pyarrow')
+        else:
+            df = dd.read_parquet(path, storage_options=storage_options,
+                                 filters = filters, engine = 'pyarrow')
+    else:
+        if usecols:
+            df = dd.read_parquet(path, storage_options=storage_options, 
+                                 columns = usecols, engine = 'pyarrow')
+        else:
+            df = dd.read_parquet(path, storage_options=storage_options,
+                                 engine = 'pyarrow')
     return df
 
 def handle_time(df, utc_region):
@@ -90,36 +111,44 @@ def handle_time(df, utc_region):
     df['local_time'] = df['ts'].dt.tz_convert(utc_region)
     time_attributes(df)
 
-def assign_geography_to_jams(df, geog_info = None):
-    '''
-    Assign a geography to each traffic jam. The geography is given based on the starting point of the jam. 
-    Do not use this function for detailed geographies. In that case, refer to: 
+# def assign_geography_to_jams(df, projected_crs, geog_info = None):
+#     '''
+#     Assign a geography to each traffic jam. The geography is given based on the starting point of the jam. 
+#     Do not use this function for detailed geographies. In that case, refer to: 
 
-    Parameters:
-    - df (DataFrame): The Dask or Pandas DataFrame containing traffic jam data.
-    - geog_info (dict): A dictionary containing geographical information for assignment. 
-    The key is the name of the geography, and the value is the georreferenced data with the 
-    geographic subdivisions. 
+#     Parameters:
+#     - df (DataFrame): The Dask or Pandas DataFrame containing traffic jam data.
+#     - geog_info (dict): A dictionary containing geographical information for assignment. 
+#     The key is the name of the geography, and the value is the georreferenced data with the 
+#     geographic subdivisions. 
 
-    Returns:
-    - None: Modifies the DataFrame in place.
-    '''
-    df['region'] = 'region'
+#     Returns:
+#     - None: Modifies the DataFrame in place.
+#     '''
+#     df['region'] = 'region'
 
-    if geog_info is not None:
-        if is_dask_dataframe(df):
-            gddf_points = create_dask_gdf_start_point(df)
-            for region_name, gdf_area in geog_info.items():
-                    gddf_points = sjoin_with_dask(gddf_points, gdf_area, polygon_id_col='Region')
-                    gddf_points = gddf_points.rename(columns = {'Region': region_name})
-            return gddf_points
-        else:
-            gdf_points = create_pandas_gdf_start_point(df)
-            for region_name, gdf_area in geog_info.items():
-                gdf_points = gpd.sjoin(gdf_points, gdf_area[['Region', 'geometry']], how='left', predicate='intersects')
-                gdf_points.drop(columns=['index_right'], inplace=True)
-                gdf_points = gdf_points.rename(columns = {'Region': region_name})
-            return gdf_points
+#     if geog_info is not None:
+#         if is_dask_dataframe(df):
+#             for region_name, gdf_area in geog_info.items():
+#             unique_jams_over_agg_geom = parallelized_overlay(df, gdf_area)
+            
+            
+#             assign_geography_to_jams = create_dask_gdf_start_point(df)
+#             for region_name, gdf_area in geog_info.items():
+#                     gddf_points = sjoin_with_dask(gddf_points, gdf_area, polygon_id_col='Region')
+#                     gddf_points = gddf_points.rename(columns = {'Region': region_name})
+#             return gddf_points
+#         else:
+#             gdf_points = create_pandas_gdf_start_point(df)
+#             gdf_points = gdf_points.to_crs(projected_crs)
+#             for region_name, gdf_area in geog_info.items():
+#                 gdf_area_prj = gdf.to_crs(projected_crs)
+#                 gdf_points = gpd.sjoin(gdf_points, gdf_area_prj[['Region', 'geometry']], how='left', predicate='intersects')
+#                 gdf_points.drop(columns=['index_right'], inplace=True)
+#                 gdf_points = gdf_points.rename(columns = {'Region': region_name})
+#             return gdf_points
+#     else:
+#         return df
 
 def remove_level5(ddf):
     '''
@@ -143,10 +172,10 @@ def time_attributes(df):
     Returns:
     - None: Modifies the DataFrame in place.
     '''
-    df['year'] = df['local_time'].dt.year
-    df['month'] = df['local_time'].dt.month
+    df['year'] = df['local_time'].dt.year.astype('int16')
+    df['month'] = df['local_time'].dt.month.astype('int8')
     df['date'] = df['local_time'].dt.date
-    df['hour'] = df['local_time'].dt.hour
+    df['hour'] = df['local_time'].dt.hour.astype('int8')
     
     # Use appropriate datetime function based on DataFrame type
     if is_dask_dataframe(df):
@@ -321,7 +350,148 @@ def create_gdf(ddf):
     gddf = gddf.set_crs("EPSG:4326")
     return gddf
 
+def parallelized_overlay(ddf, gdf_area):
+    '''
+    Parallelize overlay operation by partition groups over some geometry.
 
+    Parameters:
+    - ddf (DataFrame): The Dask DataFrame containing traffic jam data.
+    - aggregation_geog (GeoDataFrame): The geographical areas for aggregation.
+
+    Returns:
+    - GeoDataFrame: The result of the parallelized overlay operation.
+    '''
+    unique_geo = obtain_unique_jams_linestrings(ddf).persist()
+    delayed_process_group = delayed(overlay_group)
+    groups = [unique_geo.get_partition(i) for i in range(unique_geo.npartitions)]
+    tasks = [delayed_process_group(group, gdf_area) for group in groups]
+    results = compute(*tasks)
+    final_result = gpd.GeoDataFrame(pd.concat(results, ignore_index=True))
+    return final_result
+
+def parallelized_sjoin(ddf, gdf_area):
+    '''
+    Parallelize sjoin operation by partition groups over some geometry.
+
+    Parameters:
+    - ddf (DataFrame): The Dask DataFrame containing traffic jam data.
+    - aggregation_geog (GeoDataFrame): The geographical areas for aggregation.
+
+    Returns:
+    - GeoDataFrame: The result of the parallelized sjoin operation.
+    '''
+    unique_geo = obtain_unique_jams_linestrings(ddf).persist()
+    delayed_process_group = delayed(sjoin_group)
+    groups = [unique_geo.get_partition(i) for i in range(unique_geo.npartitions)]
+    tasks = [delayed_process_group(group, gdf_area) for group in groups]
+    results = compute(*tasks)
+    final_result = gpd.GeoDataFrame(pd.concat(results, ignore_index=True))
+    return final_result
+
+def obtain_unique_jams_linestrings(ddf):
+    '''
+    Otain unique jam's geometries.
+
+    Parameters:
+    - ddf (DataFrame): The Dask DataFrame containing traffic jam data.
+
+    Returns:
+    - GeoDataFrame: A GeoDataFrame with unique jam linestrings.
+    '''
+    unique_geo = ddf[["geoWKT"]].drop_duplicates().reset_index(drop=True).reset_index()
+    unique_geo = create_gdf(unique_geo)
+    return unique_geo
+
+def overlay_group(group, gdf_area):
+    '''
+    Perform an overlay between layers for delayed processes.
+
+    Parameters:
+    - group (GeoDataFrame): A GeoDataFrame group to overlay.
+    - gdf_area (GeoDataFrame): A GeoDataFrame with polygons.
+
+    Returns:
+    - GeoDataFrame: The result of the overlay operation.
+    '''
+    result = gpd.overlay(group, gdf_area, how = 'intersection')
+    return result
+
+def sjoin_group(group, gdf_area):
+    '''
+    Perform a sjoin between layers for delayed processes.
+
+    Parameters:
+    - group (GeoDataFrame): A GeoDataFrame group to overlay.
+    - gdf_area (GeoDataFrame): A GeoDataFrame with polygons.
+
+    Returns:
+    - GeoDataFrame: The result of the overlay operation.
+    '''
+    result = gpd.sjoin(group, gdf_area, how = 'inner', predicate = 'intersects')
+    return result
+
+
+def distribute_jam_over_aggregation_geom(gddf, ddf, projected_crs):
+    '''
+    Distribute the jam over the aggregation geometry.
+
+    Parameters:
+    - gddf (GeoDataFrame): The GeoDataFrame with unique jams and geometry.
+    - ddf (DataFrame): The Dask DataFrame containing traffic jam data - the original data.
+    - projected_crs (str): The projected coordinate reference system yo be used.
+
+    Returns:
+    - DataFrame: A Dask DataFrame with jams distributed over the aggregation geometry. 
+                Notice that this DataFrame will have more rows than the original one due to the overlay process. 
+    '''
+    gddf = gddf.to_crs(projected_crs)
+    gddf['length_in_geom'] = gddf['geometry'].length
+    gddf["new_geoWKT"] = gddf["geometry"].apply(lambda geom: geom.wkt)
+    df = dd.from_pandas(gddf)
+    merge = ddf.merge(df, left_on = 'geoWKT', right_on = 'geoWKT', how = 'left')
+    merge = merge.drop(['geoWKT', 'length'], axis = 1)
+    merge = merge.rename(columns = {'new_geoWKT':'geoWKT', 'length_in_geom': 'length'})
+    return merge
+
+def split_jams_into_geometries(ddf, gdf_area, projected_crs):
+    '''Split jams into geometries (polygons). Notice that this is a heavy process. 
+    It is useful when dealing with small geographies.
+    
+    Parameters:
+    - ddf (DataFrame): The Dask DataFrame containing traffic jam data - the original data.
+    - gdf_area (GeoDataFrame): A GeoDataFrame with polygons.
+    - projected_crs (str): The projected coordinate reference system to be used.
+
+    Returns:
+    - DataFrame: A Dask DataFrame with jams distributed over the aggregation geometry. 
+                Notice that this DataFrame will have more rows than the original one due to the overlay process.
+    '''
+    unique_jams_over_agg_geom = parallelized_overlay(ddf, gdf_area)
+    jams_over_agg_geom = distribute_jams_over_aggregation_geom(unique_jams_over_agg_geom, ddf_filtered, projected_crs)    
+    return jams_over_agg_geom
+    
+def assign_geography_to_jams(df, projected_crs, geog_info = None):
+    '''
+    Assign a geography to each traffic jam. The geography is given based on the starting point of the jam. 
+    Do not use this function for detailed geographies. In that case, refer to: 
+
+    Parameters:
+    - df (DataFrame): The Dask or Pandas DataFrame containing traffic jam data.
+    - geog_info (dict): A dictionary containing geographical information for assignment. 
+    The key is the name of the geography, and the value is the georreferenced data with the 
+    geographic subdivisions. 
+
+    Returns:
+    - None: Modifies the DataFrame in place.
+    '''
+    df['region'] = 'region'
+
+    if geog_info is not None:
+        if is_dask_dataframe(df):
+            for region_name, gdf_area in geog_info.items():
+                unique_jams_over_agg_geom = parallelized_sjoin(df, gdf_area)
+                merge = ddf.merge(df, left_on = 'geoWKT', right_on = 'geoWKT', how = 'left')
+            
 def obtain_hexagons_for_area(area, resolution):
     '''
     Create a georeferenced layer of H3 hexagons for a given Area of Operation.
@@ -344,22 +514,6 @@ def obtain_hexagons_for_area(area, resolution):
     hex_gdf = gpd.GeoDataFrame({'hex_id': hex_ids, 'geometry': hex_geometries}, crs="EPSG:4326")
     hex_gdf.rename(columns={'hex_id': 'Region'}, inplace=True)
     return hex_gdf
-
-def classify_jam_by_region(ddf, geogs, year, month, projected_crs, dow = None):
-    '''It is important to filter the dataset as much as it can be filtered before the spatial operation'''
-    start_date = dt(year, month, 1)
-    if month == 12:
-        end_date = dt(year + 1, 1, 1) - timedelta(days=1)
-    else:
-        end_date = dt(year, month + 1, 1) - timedelta(days=1)
-    date_range = [x.date() for x in pd.date_range(start_date, end_date)]
-    dates_of_interest = filter_date_range_by_dow(date_range, dow)
-    
-    ddf_filtered = ddf[ddf['date'].isin(dates_of_interest)].copy()
-    unique_jams_over_agg_geom = parallelized_overlay(ddf_filtered, geogs)
-    jams_over_agg_geom = distribute_jams_over_aggregation_geom(unique_jams_over_agg_geom, ddf_filtered, projected_crs)    
-    return jams_over_agg_geom
-
 def create_dask_gdf_start_point(ddf):
     '''
     Create a Dask-Geopandas GeoDataFrame from a Dask DataFrame using the start
@@ -521,70 +675,3 @@ def sjoin_with_dask(gddf_points, gdf_polygons, polygon_id_col='Region'):
 #     table['city'] = table['city'].apply(lambda x: remove_last_comma(x))
 #     table.set_index('city', inplace=True)
 
-
-
-
-# def obtain_unique_jams_linestrings(ddf):
-#     '''
-#     Get unique jam linestrings to avoid overlaying the same linestring multiple times.
-
-#     Parameters:
-#     - ddf (DataFrame): The Dask DataFrame containing traffic jam data.
-
-#     Returns:
-#     - GeoDataFrame: A GeoDataFrame with unique jam linestrings.
-#     '''
-#     unique_geo = ddf[["geoWKT"]].drop_duplicates().reset_index(drop=True).reset_index()
-#     unique_geo = create_gdf(unique_geo)
-#     return unique_geo
-
-# def overlay_group(group, hexagons):
-#     '''
-#     Perform an overlay between layers for delayed processes.
-
-#     Parameters:
-#     - group (GeoDataFrame): A GeoDataFrame group to overlay.
-#     - hexagons (GeoDataFrame): A GeoDataFrame of hexagons to overlay with.
-
-#     Returns:
-#     - GeoDataFrame: The result of the overlay operation.
-#     '''
-#     result = gpd.overlay(group, hexagons, how = 'intersection')
-#     return result
-
-# def parallelized_overlay(ddf, aggregation_geog):
-#     '''
-#     Parallelize overlay by groups over some geometry.
-
-#     Parameters:
-#     - ddf (DataFrame): The Dask DataFrame containing traffic jam data.
-#     - aggregation_geog (GeoDataFrame): The geographical areas for aggregation.
-
-#     Returns:
-#     - GeoDataFrame: The result of the parallelized overlay operation.
-#     '''
-#     unique_geo = obtain_unique_jams_linestrings(ddf).persist()
-#     delayed_process_group = delayed(overlay_group)
-#     groups = [unique_geo.get_partition(i) for i in range(unique_geo.npartitions)]
-#     tasks = [delayed_process_group(group, aggregation_geog) for group in groups]
-#     results = compute(*tasks)
-#     final_result = gpd.GeoDataFrame(pd.concat(results, ignore_index=True))
-#     return final_result
-
-# def distribute_jams_over_aggregation_geom(gddf, ddf, projected_crs):
-#     '''
-#     Distribute jams over aggregation geometry.
-
-#     Parameters:
-#     - gddf (GeoDataFrame): The GeoDataFrame with jams and geometry.
-#     - ddf (DataFrame): The Dask DataFrame containing traffic jam data.
-#     - projected_crs (str): The coordinate reference system for projection.
-
-#     Returns:
-#     - DataFrame: A DataFrame with jams distributed over the aggregation geometry.
-#     '''
-#     gddf = gddf.to_crs(projected_crs)
-#     gddf['length_in_geom'] = gddf['geometry'].length
-#     df = dd.from_pandas(gddf)
-#     merge = ddf.merge(df, left_on = 'geoWKT', right_on = 'geoWKT', how = 'left')   
-#     return merge

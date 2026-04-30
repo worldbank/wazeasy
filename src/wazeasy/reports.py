@@ -5,7 +5,7 @@ def run_basic_report(df, start_date = None, end_date = None):
 
     dates_of_interest = utils.define_dates_of_interest(df, start_date, end_date)
     df_filt = df[df['date'].isin(dates_of_interest)]
-    
+    df_filt = df_filt.persist()
     plots.jams_per_day(df_filt)
     plots.jams_per_day_rolling_avg(df_filt)
     plots.jams_monthly_aggregated(df_filt)

@@ -1,6 +1,8 @@
 Baghdad:
   timezone: 
     timezone_name: 'Asia/Baghdad'
+  crs:
+    projected_crs: 'EPSG:32638'
   geographies:
     'admin1':
       name: 'Administrative Level 1'
