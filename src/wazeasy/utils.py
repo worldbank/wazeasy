@@ -7,6 +7,7 @@ import dask_geopandas
 import itertools
 from shapely import Point, Polygon
 import h3
+from dask import delayed, compute
 
 
 def is_dask_dataframe(df):
@@ -19,7 +20,7 @@ def load_data(path, storage_options = None,
     Load data from a specified path for a given year and month.
 
     Parameters:
-    - path (str): The main directory path where data files are stored.
+    - path (str or list of string): The main directory path where data files are stored. It can also be a list of files to read
     - year (int): The year of the data to load.
     - month (int): The month of the data to load.
     - storage_options (dict, optional): Options for storage backends, e.g., for cloud storage.
@@ -335,7 +336,7 @@ def hourly_tci_by_geography (df, agg_spatial, agg_column, start_date = None, end
     hourly_tci_by_geography = daily_hourly_tci.groupby(['hour', agg_spatial])['tci'].mean()
     return hourly_tci_by_geography.reset_index()
    
-def create_gdf(ddf):
+def create_gdf(ddf, start_node = False):
     '''
     Create a Dask-Geopandas GeoDataFrame from a Dask DataFrame.
 
@@ -345,7 +346,11 @@ def create_gdf(ddf):
     Returns:
     - GeoDataFrame: A GeoDataFrame with the geometry column set.
     '''
-    ddf['geometry'] = dask_geopandas.from_wkt(ddf['geoWKT'], crs='epsg:4326')
+    if start_node:
+        ddf['geoWKT_point'] = ddf['geoWKT'].map_partitions(process_geowkt_partition, meta=('geoWKT', 'object'))
+        ddf['geometry'] = dask_geopandas.from_wkt(ddf['geoWKT_point'], crs='epsg:4326')
+    else:
+        ddf['geometry'] = dask_geopandas.from_wkt(ddf['geoWKT'], crs='epsg:4326')
     gddf = dask_geopandas.from_dask_dataframe(ddf, geometry='geometry')
     gddf = gddf.set_crs("EPSG:4326")
     return gddf
@@ -380,7 +385,7 @@ def parallelized_sjoin(ddf, gdf_area):
     Returns:
     - GeoDataFrame: The result of the parallelized sjoin operation.
     '''
-    unique_geo = obtain_unique_jams_linestrings(ddf).persist()
+    unique_geo = obtain_unique_jams_linestrings(ddf, start_node = True).persist()
     delayed_process_group = delayed(sjoin_group)
     groups = [unique_geo.get_partition(i) for i in range(unique_geo.npartitions)]
     tasks = [delayed_process_group(group, gdf_area) for group in groups]
@@ -388,18 +393,19 @@ def parallelized_sjoin(ddf, gdf_area):
     final_result = gpd.GeoDataFrame(pd.concat(results, ignore_index=True))
     return final_result
 
-def obtain_unique_jams_linestrings(ddf):
+def obtain_unique_jams_linestrings(ddf, start_node = False):
     '''
     Otain unique jam's geometries.
 
     Parameters:
     - ddf (DataFrame): The Dask DataFrame containing traffic jam data.
+    - start_node (bool, optional): Whether to use the starting point of the jam as the geometry.
 
     Returns:
     - GeoDataFrame: A GeoDataFrame with unique jam linestrings.
     '''
     unique_geo = ddf[["geoWKT"]].drop_duplicates().reset_index(drop=True).reset_index()
-    unique_geo = create_gdf(unique_geo)
+    unique_geo = create_gdf(unique_geo, start_node)
     return unique_geo
 
 def overlay_group(group, gdf_area):
@@ -467,7 +473,7 @@ def split_jams_into_geometries(ddf, gdf_area, projected_crs):
                 Notice that this DataFrame will have more rows than the original one due to the overlay process.
     '''
     unique_jams_over_agg_geom = parallelized_overlay(ddf, gdf_area)
-    jams_over_agg_geom = distribute_jams_over_aggregation_geom(unique_jams_over_agg_geom, ddf_filtered, projected_crs)    
+    jams_over_agg_geom = distribute_jam_over_aggregation_geom(unique_jams_over_agg_geom, ddf, projected_crs)    
     return jams_over_agg_geom
     
 def assign_geography_to_jams(df, projected_crs, geog_info = None):
@@ -489,8 +495,19 @@ def assign_geography_to_jams(df, projected_crs, geog_info = None):
     if geog_info is not None:
         if is_dask_dataframe(df):
             for region_name, gdf_area in geog_info.items():
-                unique_jams_over_agg_geom = parallelized_sjoin(df, gdf_area)
-                merge = ddf.merge(df, left_on = 'geoWKT', right_on = 'geoWKT', how = 'left')
+                unique_jams_over_agg_geom = parallelized_sjoin(df, gdf_area[['Region', 'geometry']])
+                unique_jams_ddf = dd.from_pandas(unique_jams_over_agg_geom)
+                df = df.merge(unique_jams_ddf[['geoWKT', 'Region']], left_on = 'geoWKT', right_on = 'geoWKT', how = 'left')
+                df = df.rename(columns = {'Region': region_name})
+                # import pdb; pdb.set_trace()
+            return df
+        
+            # TODO: make this process for pandas dataframes/
+    return df
+
+def process_geowkt_partition(partition):
+    """Process a partition using vectorized pandas operations"""
+    return 'POINT (' + partition.str.split(', ').str[-1].str.replace(')', '', regex=False) + ')'
             
 def obtain_hexagons_for_area(area, resolution):
     '''
@@ -514,65 +531,63 @@ def obtain_hexagons_for_area(area, resolution):
     hex_gdf = gpd.GeoDataFrame({'hex_id': hex_ids, 'geometry': hex_geometries}, crs="EPSG:4326")
     hex_gdf.rename(columns={'hex_id': 'Region'}, inplace=True)
     return hex_gdf
-def create_dask_gdf_start_point(ddf):
-    '''
-    Create a Dask-Geopandas GeoDataFrame from a Dask DataFrame using the start
-    point from the jam as the geometry
 
-    Parameters:
-    - ddf (DataFrame): The Dask DataFrame containing geographical data.
+# def create_dask_gdf_start_point(ddf):
+#     '''
+#     Create a Dask-Geopandas GeoDataFrame from a Dask DataFrame using the start
+#     point from the jam as the geometry
 
-    Returns:
-    - GeoDataFrame: A GeoDataFrame with the geometry column set.
-    '''
-    ddf['geoWKT_point'] = ddf['geoWKT'].map_partitions(process_geowkt_partition, meta=('geoWKT', 'object'))
-    ddf['geometry'] = dask_geopandas.from_wkt(ddf['geoWKT_point'], crs='epsg:4326')
-    gddf = dask_geopandas.from_dask_dataframe(ddf, geometry='geometry')
-    gddf = gddf.set_crs("EPSG:4326")
-    return gddf
+#     Parameters:
+#     - ddf (DataFrame): The Dask DataFrame containing geographical data.
 
-def create_pandas_gdf_start_point(df):
-    '''
-    Create a GeoDataFrame from a DataFrame by using the last point from a LineString stored in WKT format as the geometry.
+#     Returns:
+#     - GeoDataFrame: A GeoDataFrame with the geometry column set.
+#     '''
+#     ddf['geoWKT_point'] = ddf['geoWKT'].map_partitions(process_geowkt_partition, meta=('geoWKT', 'object'))
+#     ddf['geometry'] = dask_geopandas.from_wkt(ddf['geoWKT_point'], crs='epsg:4326')
+#     gddf = dask_geopandas.from_dask_dataframe(ddf, geometry='geometry')
+#     gddf = gddf.set_crs("EPSG:4326")
+#     return gddf
 
-    Parameters:
-    - df (DataFrame): The Pandascontaining WKT geometry in 'geoWKT' column.
+# def create_pandas_gdf_start_point(df):
+#     '''
+#     Create a GeoDataFrame from a DataFrame by using the last point from a LineString stored in WKT format as the geometry.
 
-    Returns:
-    - GeoDataFrame: A GeoDataFrame with geometry set from the WKT column.
-    '''
-    lines_geometry = gpd.GeoSeries.from_wkt(df['geoWKT'], crs='epsg:4326')
-    points = lines_geometry.apply(lambda x: Point(x.coords[-1]))
-    df['geometry'] = points
-    gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='epsg:4326')
-    return gdf
+#     Parameters:
+#     - df (DataFrame): The Pandascontaining WKT geometry in 'geoWKT' column.
 
-def process_geowkt_partition(partition):
-    """Process a partition using vectorized pandas operations"""
-    return 'POINT (' + partition.str.split(', ').str[-1].str.replace(')', '', regex=False) + ')'
+#     Returns:
+#     - GeoDataFrame: A GeoDataFrame with geometry set from the WKT column.
+#     '''
+#     lines_geometry = gpd.GeoSeries.from_wkt(df['geoWKT'], crs='epsg:4326')
+#     points = lines_geometry.apply(lambda x: Point(x.coords[-1]))
+#     df['geometry'] = points
+#     gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='epsg:4326')
+#     return gdf
 
-def sjoin_with_dask(gddf_points, gdf_polygons, polygon_id_col='Region'):
-    '''
-    Assign points to polygons. Dask does not have a function for left spatial join, so we need 
-    to do it manually. 
+
+# def sjoin_with_dask(gddf_points, gdf_polygons, polygon_id_col='Region'):
+#     '''
+#     Assign points to polygons. Dask does not have a function for left spatial join, so we need 
+#     to do it manually. 
     
-    Parameters:
-    - gddf_points (GeoDataFrame): Dask GeoDataFrame with Point geometries 
-    - gdf_polygons (GeoDataFrame): GeoDataFrame with Polygon geometries
-    - polygon_id_col (str): Column name in gdf_polygons to use as identifier
+#     Parameters:
+#     - gddf_points (GeoDataFrame): Dask GeoDataFrame with Point geometries 
+#     - gdf_polygons (GeoDataFrame): GeoDataFrame with Polygon geometries
+#     - polygon_id_col (str): Column name in gdf_polygons to use as identifier
     
-    Returns:
-    - GeoDataFrame: Original points with h3_id and polygon assignment columns
-    '''
+#     Returns:
+#     - GeoDataFrame: Original points with h3_id and polygon assignment columns
+#     '''
     
-    if gddf_points.crs != 'EPSG:4326':
-            gddf_points = gddf_points.to_crs('EPSG:4326')
-    if gdf_polygons.crs != 'EPSG:4326':
-        gdf_polygons = gdf_polygons.to_crs('EPSG:4326')
+#     if gddf_points.crs != 'EPSG:4326':
+#             gddf_points = gddf_points.to_crs('EPSG:4326')
+#     if gdf_polygons.crs != 'EPSG:4326':
+#         gdf_polygons = gdf_polygons.to_crs('EPSG:4326')
 
-    join = gddf_points.sjoin(gdf_polygons[[polygon_id_col, 'geometry']], how='inner', predicate='intersects')
-    gddf_points[polygon_id_col] = join[polygon_id_col]
-    return gddf_points
+#     join = gddf_points.sjoin(gdf_polygons[[polygon_id_col, 'geometry']], how='inner', predicate='intersects')
+#     gddf_points[polygon_id_col] = join[polygon_id_col]
+#     return gddf_points
 
 
 ############ Old code ##############
