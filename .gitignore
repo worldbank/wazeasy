@@ -98,3 +98,4 @@ src/*/_version.py
 
 # File extensions
 *.rst 
+*.json

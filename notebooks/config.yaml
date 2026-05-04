@@ -1,0 +1,18 @@
+Baghdad:
+  timezone: 
+    timezone_name: 'Asia/Baghdad'
+  crs:
+    projected_crs: 'EPSG:32638'
+  geographies:
+    'admin1':
+      name: 'Administrative Level 1'
+      path: '../data/gadm41_IRQ_admin1.gpkg'
+      plot_by_geography: True
+    'admin2':
+      name: 'Administrative Level 2'
+      path: '../data/gadm41_IRQ_admin2.gpkg'
+      plot_by_geography: True
+    'hex_id_7':
+      name: 'Hexagons Level 7'
+      path: '../data/hexagons_level_7.gpkg'
+      plot_by_geography: False 
