@@ -17,9 +17,10 @@ def run_basic_report(df, start_date = None, end_date = None):
 
 
 def run_geog_report(df, geographies, start_date = None, end_date = None):
-
+    dict_geogs = {geog: gpd.read_file(geog_data['path']) for geog, geog_data in geographies.items()}
     dates_of_interest = utils.define_dates_of_interest(df, start_date, end_date)
     df_filt = df[df['date'].isin(dates_of_interest)]
+    df_filt = utils.assign_geography_to_jams(df_filt, dict_geogs)
     df_filt = df_filt.persist()
     
     for geog, geog_data in geographies.items():

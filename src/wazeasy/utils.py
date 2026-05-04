@@ -112,45 +112,6 @@ def handle_time(df, utc_region):
     df['local_time'] = df['ts'].dt.tz_convert(utc_region)
     time_attributes(df)
 
-# def assign_geography_to_jams(df, projected_crs, geog_info = None):
-#     '''
-#     Assign a geography to each traffic jam. The geography is given based on the starting point of the jam. 
-#     Do not use this function for detailed geographies. In that case, refer to: 
-
-#     Parameters:
-#     - df (DataFrame): The Dask or Pandas DataFrame containing traffic jam data.
-#     - geog_info (dict): A dictionary containing geographical information for assignment. 
-#     The key is the name of the geography, and the value is the georreferenced data with the 
-#     geographic subdivisions. 
-
-#     Returns:
-#     - None: Modifies the DataFrame in place.
-#     '''
-#     df['region'] = 'region'
-
-#     if geog_info is not None:
-#         if is_dask_dataframe(df):
-#             for region_name, gdf_area in geog_info.items():
-#             unique_jams_over_agg_geom = parallelized_overlay(df, gdf_area)
-            
-            
-#             assign_geography_to_jams = create_dask_gdf_start_point(df)
-#             for region_name, gdf_area in geog_info.items():
-#                     gddf_points = sjoin_with_dask(gddf_points, gdf_area, polygon_id_col='Region')
-#                     gddf_points = gddf_points.rename(columns = {'Region': region_name})
-#             return gddf_points
-#         else:
-#             gdf_points = create_pandas_gdf_start_point(df)
-#             gdf_points = gdf_points.to_crs(projected_crs)
-#             for region_name, gdf_area in geog_info.items():
-#                 gdf_area_prj = gdf.to_crs(projected_crs)
-#                 gdf_points = gpd.sjoin(gdf_points, gdf_area_prj[['Region', 'geometry']], how='left', predicate='intersects')
-#                 gdf_points.drop(columns=['index_right'], inplace=True)
-#                 gdf_points = gdf_points.rename(columns = {'Region': region_name})
-#             return gdf_points
-#     else:
-#         return df
-
 def remove_level5(ddf):
     '''
     Remove traffic jams with level 5 from the DataFrame as these jams are associated to road closures.
@@ -476,7 +437,7 @@ def split_jams_into_geometries(ddf, gdf_area, projected_crs):
     jams_over_agg_geom = distribute_jam_over_aggregation_geom(unique_jams_over_agg_geom, ddf, projected_crs)    
     return jams_over_agg_geom
     
-def assign_geography_to_jams(df, projected_crs, geog_info = None):
+def assign_geography_to_jams(df, geog_info = None):
     '''
     Assign a geography to each traffic jam. The geography is given based on the starting point of the jam. 
     Do not use this function for detailed geographies. In that case, refer to: 
