@@ -4,8 +4,10 @@ import json
 from datetime import datetime as dt
 
 import altair as alt
+import altair_tiles as alt_tiles
 import attaviz
 import pandas as pd
+from shapely.geometry import MultiPolygon, Polygon
 
 from wazeasy import utils
 
@@ -683,17 +685,106 @@ def map_tci(
     df, agg_spatial, agg_column, layer, start_date=None, end_date=None, dow=None
 ):
     """
-    Render a choropleth of mean daily TCI by spatial unit.
+    Render an interactive Folium choropleth of mean daily TCI by spatial unit.
+
+    Useful for exploring results — pan, zoom, and inspect individual polygons.
+    For a report-ready static-style figure with attaviz styling and a basemap
+    overlay, see :func:`map_tci_static`.
 
     Parameters:
     - df (DataFrame): Dask/Pandas DataFrame containing traffic data.
     - agg_spatial (str): Spatial aggregation column.
     - agg_column (str): Column used in TCI computation.
-    - layer (GeoDataFrame): Polygons indexed by 'Region' before the call.
+    - layer (GeoDataFrame): Polygons with a 'Region' column.
     - start_date, end_date, dow: optional time filters.
 
     Returns:
-    - alt.Chart: Altair geoshape choropleth styled with attaviz SEQ_RED.
+    - folium.Map: Interactive Leaflet-based map produced by ``GeoDataFrame.explore``.
+    """
+    layer = layer.copy()
+    layer.set_index("Region", inplace=True)
+    layer["TCI"] = utils.mean_daily_tci_geog(
+        df,
+        agg_spatial,
+        agg_column,
+        layer,
+        start_date=start_date,
+        end_date=end_date,
+        dow=dow,
+    )
+    layer = layer[layer["TCI"] > 0]
+    layer.reset_index(inplace=True)
+    return layer.explore(
+        column="TCI",
+        cmap="Spectral_r",
+        tiles="CartoDB Positron",
+        legend_kwds={"label": "TCI by Region", "orientation": "horizontal"},
+    )
+
+
+def _ensure_d3_winding(geom):
+    """Ensure polygon ring orientation matches D3's spherical convention.
+
+    D3's spherical projections (mercator, etc.) require CW exterior rings:
+    a CCW ring is treated as the unbounded complement, which fills
+    everything outside the polygon and leaves the interior transparent.
+    GeoJSON / shapely default to CCW exteriors (right-hand rule on a plane),
+    so we flip those before handing geometry to Vega. Geometries already in
+    CW form (e.g. some GADM admin boundaries) are passed through unchanged.
+    """
+    if geom is None:
+        return geom
+    if geom.geom_type == "Polygon":
+        if geom.exterior.is_ccw:
+            return Polygon(
+                list(geom.exterior.coords)[::-1],
+                [list(r.coords)[::-1] for r in geom.interiors],
+            )
+        return geom
+    if geom.geom_type == "MultiPolygon":
+        return MultiPolygon([_ensure_d3_winding(p) for p in geom.geoms])
+    return geom
+
+
+def map_tci_static(
+    df,
+    agg_spatial,
+    agg_column,
+    layer,
+    start_date=None,
+    end_date=None,
+    dow=None,
+    provider="CartoDB.Positron",
+    width=600,
+    height=500,
+    show_no_data_regions=False,
+):
+    """
+    Render a static Altair choropleth of mean daily TCI over a tiled basemap.
+
+    Basemap tiles are added by ``altair_tiles``, which handles tile fetching,
+    auto-zoom, attribution, and projection alignment with the geoshape layer.
+    The view auto-fits to the bounds of ``layer``.
+
+    Parameters:
+    - df (DataFrame): Dask/Pandas DataFrame containing traffic data.
+    - agg_spatial (str): Spatial aggregation column.
+    - agg_column (str): Column used in TCI computation.
+    - layer (GeoDataFrame): Polygons with a 'Region' column, in any CRS
+      (will be reprojected to EPSG:4326 if needed).
+    - start_date, end_date, dow: optional time filters.
+    - provider (str | xyzservices.TileProvider): XYZ tile provider, either a
+      preconfigured name like ``"CartoDB.Positron"`` / ``"OpenStreetMap.Mapnik"``
+      or a ``xyzservices`` provider object. See ``altair_tiles.providers``.
+    - width, height (int): Chart dimensions in pixels.
+    - show_no_data_regions (bool): If True, polygons without TCI data are
+      rendered in the attaviz NO_DATA color. Default False — useful for
+      tessellating geometries (e.g. H3 hexes) where rendering empty cells
+      would obscure the basemap. Set True for admin/regional maps where
+      no-data context is informative.
+
+    Returns:
+    - alt.LayerChart: Basemap tiles + attaviz SEQ_RED choropleth + attribution.
     """
     layer = layer.copy()
     if "Region" in layer.columns:
@@ -713,25 +804,25 @@ def map_tci(
     if layer.crs is None or layer.crs.to_epsg() != 4326:
         layer = layer.to_crs(epsg=4326)
 
-    geojson = json.loads(layer[["Region", "geometry"]].to_json())
-    geo_data = alt.Data(values=geojson, format=alt.DataFormat(property="features"))
-
     tci_table = pd.DataFrame(
         {"Region": tci_series.index.astype(str), "TCI": tci_series.values}
     )
     tci_table["has_data"] = tci_table["TCI"].notna() & (tci_table["TCI"] > 0)
 
+    if not show_no_data_regions:
+        regions_with_data = set(tci_table.loc[tci_table["has_data"], "Region"])
+        layer = layer[layer["Region"].astype(str).isin(regions_with_data)]
+
+    layer = layer.assign(geometry=layer.geometry.apply(_ensure_d3_winding))
+    geojson = json.loads(layer[["Region", "geometry"]].to_json())
+    geo_data = alt.Data(values=geojson, format=alt.DataFormat(property="features"))
+
     select = alt.selection_point(
         fields=["properties.Region"], on="mouseover", empty=False
     )
-
     color = alt.condition(
         "datum.has_data",
-        alt.Color(
-            "TCI:Q",
-            title="TCI",
-            scale=alt.Scale(range=attaviz.SEQ_RED),
-        ),
+        alt.Color("TCI:Q", title="TCI", scale=alt.Scale(range=attaviz.SEQ_RED)),
         alt.value(attaviz.NO_DATA),
     )
     stroke = (
@@ -741,9 +832,9 @@ def map_tci(
     )
     stroke_width = alt.when(select).then(alt.value(2.5)).otherwise(alt.value(0.3))
 
-    chart = (
-        alt.Chart(geo_data)
-        .mark_geoshape(strokeCap="round", strokeJoin="round")
+    choropleth = (
+        alt.Chart(geo_data, width=width, height=height)
+        .mark_geoshape(strokeCap="round", strokeJoin="round", fillOpacity=0.7)
         .transform_lookup(
             lookup="properties.Region",
             from_=alt.LookupData(tci_table, "Region", ["TCI", "has_data"]),
@@ -758,8 +849,10 @@ def map_tci(
             ],
         )
         .add_params(select)
-        .project(type="identity", reflectY=True)
-        .properties(title=f"Mean daily TCI by {agg_spatial.capitalize()}")
+        .project(type="mercator")
     )
-    chart = attaviz.add_caption(chart, "Source: Waze for Cities data").interactive()
-    return chart
+
+    chart = alt_tiles.add_tiles(
+        choropleth, provider=provider, width=width, height=height
+    ).properties(title=f"Mean daily TCI by {agg_spatial.capitalize()}")
+    return attaviz.add_caption(chart, "Source: Waze for Cities data")

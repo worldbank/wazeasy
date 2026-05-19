@@ -198,9 +198,9 @@ def mean_daily_tci_geog(df, agg_spatial, agg_column, layer, start_date = None, e
 
     Parameters:
     - df (DataFrame): The Dask/Pandas DataFrame containing traffic jam data.
-    - start_date (str, optional): The start date (YYYY-MM-DD) of the period to consider. 
+    - start_date (str, optional): The start date (YYYY-MM-DD) of the period to consider.
         If None, it will use the minimum date in the data.
-    - end_date (str, optional): The end date (YYYY-MM-DD) of the period to consider. 
+    - end_date (str, optional): The end date (YYYY-MM-DD) of the period to consider.
         If None, it will use the maximum date in the data.
     - dow (list, optional): Days of the week to consider (0 = Monday, 6 = Sunday)
     - agg_column (str): The column to aggregate for the TCI, generally length of jam.
