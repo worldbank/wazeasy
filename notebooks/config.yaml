@@ -15,4 +15,4 @@ Baghdad:
     'hex_id_7':
       name: 'Hexagons Level 7'
       path: '../data/hexagons_level_7.gpkg'
-      plot_by_geography: False 
+      plot_by_geography: False
