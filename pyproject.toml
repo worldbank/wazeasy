@@ -49,6 +49,7 @@ dependencies = [
     "shapely",
 	"h3",
 	"seaborn",
+	"altair",
 ]
 [dependency-groups]
 dev = [
