@@ -50,6 +50,7 @@ dependencies = [
 	"h3",
 	"seaborn",
 	"altair",
+	"altair_tiles",
 	"attaviz @ git+https://github.com/datapartnership/attaviz.git",
 ]
 [dependency-groups]
