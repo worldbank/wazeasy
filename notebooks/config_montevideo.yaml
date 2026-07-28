@@ -1,0 +1,7 @@
+Montevideo:
+  timezone:
+    timezone_name: 'America/Montevideo'
+  s3_path: 's3://wbg-waze/feed/UY/784montevideo'
+  aws_profile: 'ddp-dec'
+  crs:
+    projected_crs: 'EPSG:32721'

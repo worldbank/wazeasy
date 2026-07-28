@@ -8,6 +8,9 @@ import itertools
 from shapely import Point, Polygon
 import h3
 from dask import delayed, compute
+import gzip
+import json
+import s3fs
 
 
 def is_dask_dataframe(df):
@@ -650,4 +653,101 @@ def obtain_hexagons_for_area(area, resolution):
 #     table.reset_index(inplace=True)
 #     table['city'] = table['city'].apply(lambda x: remove_last_comma(x))
 #     table.set_index('city', inplace=True)
+
+
+def load_feed_json(s3_path, start, end, data_type='jams',
+                   profile_name=None, use_dask=True, filter_level_5=True):
+    '''
+    Read Waze Feed JSON files from S3 and aggregate them into a single DataFrame.
+
+    The function reads gzipped JSON files stored in an S3 bucket organized by date
+    folders (e.g., s3://bucket/feed/UY/city/2026-06-25/2026-06-25-18-02-00.json.gz).
+    It extracts the query timestamp from the file name and adds it as a `ts` column.
+
+    Parameters:
+    - s3_path (str): S3 path to the feed folder (e.g., 's3://wbg-waze/feed/UY/784montevideo').
+    - start (str): Start date in 'YYYY-MM-DD' format (inclusive).
+    - end (str): End date in 'YYYY-MM-DD' format (inclusive).
+    - data_type (str, optional): Type of data to extract from the JSON files.
+        One of 'jams' or 'alerts'. Defaults to 'jams'.
+    - profile_name (str, optional): AWS profile name for authentication.
+        If None, uses default credentials.
+    - use_dask (bool, optional): If True, returns a Dask DataFrame.
+        If False, returns a Pandas DataFrame. Defaults to True.
+    - filter_level_5 (bool, optional): If True, removes jams with level 5 
+        (road closures). Defaults to True.
+
+    Returns:
+    - DataFrame: A Pandas or Dask DataFrame with the aggregated feed data
+        and a `ts` column indicating the query timestamp.
+    '''
+    s3_path = s3_path.rstrip('/')
+
+    if profile_name:
+        import boto3
+        session = boto3.Session(profile_name=profile_name)
+        credentials = session.get_credentials().get_frozen_credentials()
+        fs = s3fs.S3FileSystem(
+            key=credentials.access_key,
+            secret=credentials.secret_key,
+            token=credentials.token,
+        )
+    else:
+        fs = s3fs.S3FileSystem()
+
+    start_date = dt.strptime(start, '%Y-%m-%d').date()
+    end_date = dt.strptime(end, '%Y-%m-%d').date()
+
+    # Strip s3:// prefix for s3fs operations
+    bucket_path = s3_path.replace('s3://', '')
+
+    all_frames = []
+    current_date = start_date
+    while current_date <= end_date:
+        date_str = current_date.strftime('%Y-%m-%d')
+        date_folder = f"{bucket_path}/{date_str}/"
+
+        try:
+            files = fs.ls(date_folder)
+        except FileNotFoundError:
+            current_date += timedelta(days=1)
+            continue
+
+        json_files = [f for f in files if f.endswith('.json.gz')]
+
+        for file_path in json_files:
+            file_name = file_path.split('/')[-1]
+            # Extract timestamp from filename: 2026-06-25-18-02-00.json.gz
+            ts_str = file_name.replace('.json.gz', '')
+            ts = dt.strptime(ts_str, '%Y-%m-%d-%H-%M-%S')
+
+            try:
+                with fs.open(file_path, 'rb') as f:
+                    with gzip.open(f, 'rt', encoding='utf-8') as gz:
+                        data = json.load(gz)
+            except (json.JSONDecodeError, gzip.BadGzipFile, EOFError):
+                continue
+
+            records = data.get(data_type, [])
+            if not records:
+                continue
+
+            df = pd.json_normalize(records)
+            df['ts'] = ts
+            all_frames.append(df)
+
+        current_date += timedelta(days=1)
+
+    if not all_frames:
+        return pd.DataFrame() if not use_dask else dd.from_pandas(pd.DataFrame(), npartitions=1)
+
+    result = pd.concat(all_frames, ignore_index=True)
+
+    if filter_level_5 and 'level' in result.columns:
+        result = result[result['level'] != 5]
+
+    if use_dask:
+        result = dd.from_pandas(result, npartitions=max(1, len(all_frames) // 50))
+
+    return result
 
