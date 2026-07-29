@@ -11,7 +11,7 @@ from dask import delayed, compute
 import gzip
 import json
 import s3fs
-
+import boto3
 
 def is_dask_dataframe(df):
     """Check if DataFrame is a Dask DataFrame."""
@@ -654,77 +654,202 @@ def obtain_hexagons_for_area(area, resolution):
 #     table['city'] = table['city'].apply(lambda x: remove_last_comma(x))
 #     table.set_index('city', inplace=True)
 
+import os
+import uuid
+# (dejá el resto de tus imports existentes: s3fs, gzip, json, pandas as pd,
+#  dask.dataframe as dd, datetime as dt, timedelta, etc.)
 
+
+# def load_feed_json(s3_path, start, end, data_type='jams',
+#                    profile_name=None, use_dask=True, filter_level_5=True,
+#                    tmp_dir='/tmp/feed_chunks', flush_every=50_000):
+#     '''
+#     Read Waze Feed JSON files from S3 and aggregate them into a single DataFrame.
+#     The function reads gzipped JSON files stored in an S3 bucket organized by date
+#     folders (e.g., s3://bucket/feed/UY/city/2026-06-25/2026-06-25-18-02-00.json.gz).
+#     It extracts the query timestamp from the file name and adds it as a `ts` column.
+
+#     To avoid running out of memory on long date ranges, records are periodically
+#     flushed to temporary Parquet files on disk and reassembled at the end using
+#     Dask (or Pandas) from those files.
+
+#     Parameters:
+#     - s3_path (str): S3 path to the feed folder (e.g., 's3://wbg-waze/feed/UY/784montevideo').
+#     - start (str): Start date in 'YYYY-MM-DD' format (inclusive).
+#     - end (str): End date in 'YYYY-MM-DD' format (inclusive).
+#     - data_type (str, optional): Type of data to extract from the JSON files.
+#         One of 'jams' or 'alerts'. Defaults to 'jams'.
+#     - profile_name (str, optional): AWS profile name for authentication.
+#         If None, uses default credentials.
+#     - use_dask (bool, optional): If True, returns a Dask DataFrame.
+#         If False, returns a Pandas DataFrame. Defaults to True.
+#     - filter_level_5 (bool, optional): If True, removes jams with level 5
+#         (road closures). Defaults to True.
+#     - tmp_dir (str, optional): Local directory to store temporary Parquet chunks
+#         while processing. Defaults to '/tmp/feed_chunks'.
+#     - flush_every (int, optional): Number of records to accumulate in memory
+#         before flushing to a Parquet chunk on disk. Lower this if you're running
+#         into memory issues. Defaults to 50,000.
+
+#     Returns:
+#     - DataFrame: A Pandas or Dask DataFrame with the aggregated feed data
+#         and a `ts` column indicating the query timestamp.
+#     '''
+#     s3_path = s3_path.rstrip('/')
+#     if profile_name:
+#         import boto3
+#         session = boto3.Session(profile_name=profile_name)
+#         credentials = session.get_credentials().get_frozen_credentials()
+#         fs = s3fs.S3FileSystem(
+#             key=credentials.access_key,
+#             secret=credentials.secret_key,
+#             token=credentials.token,
+#         )
+#     else:
+#         fs = s3fs.S3FileSystem()
+
+#     start_date = dt.strptime(start, '%Y-%m-%d').date()
+#     end_date = dt.strptime(end, '%Y-%m-%d').date()
+#     bucket_path = s3_path.replace('s3://', '')
+
+#     # --- setup para escritura incremental (evita quedarse sin memoria) ---
+#     os.makedirs(tmp_dir, exist_ok=True)
+#     run_id = uuid.uuid4().hex[:8]
+#     all_frames = []
+#     chunk_idx = 0
+#     parquet_files = []
+
+#     total_records = 0
+#     last_reported = 0
+#     report_every = 10_000
+
+#     def flush_to_disk():
+#         nonlocal all_frames, chunk_idx
+#         if not all_frames:
+#             return
+#         chunk_df = pd.concat(all_frames, ignore_index=True)
+#         if filter_level_5 and 'level' in chunk_df.columns:
+#             chunk_df = chunk_df[chunk_df['level'] != 5]
+#         out_path = os.path.join(tmp_dir, f"{run_id}_chunk_{chunk_idx:05d}.parquet")
+#         chunk_df.to_parquet(out_path, index=False)
+#         parquet_files.append(out_path)
+#         chunk_idx += 1
+#         all_frames = []  # libera memoria
+
+#     current_date = start_date
+#     while current_date <= end_date:
+#         date_str = current_date.strftime('%Y-%m-%d')
+#         date_folder = f"{bucket_path}/{date_str}/"
+#         try:
+#             files = fs.ls(date_folder)
+#         except FileNotFoundError:
+#             current_date += timedelta(days=1)
+#             continue
+#         json_files = [f for f in files if f.endswith('.json.gz')]
+#         for file_path in json_files:
+#             file_name = file_path.split('/')[-1]
+#             # Extract timestamp from filename: 2026-06-25-18-02-00.json.gz
+#             ts_str = file_name.replace('.json.gz', '')
+#             ts = dt.strptime(ts_str, '%Y-%m-%d-%H-%M-%S')
+#             try:
+#                 with fs.open(file_path, 'rb') as f:
+#                     with gzip.open(f, 'rt', encoding='utf-8') as gz:
+#                         data = json.load(gz)
+#             except (json.JSONDecodeError, gzip.BadGzipFile, EOFError):
+#                 continue
+#             records = data.get(data_type, [])
+#             if not records:
+#                 continue
+#             df = pd.json_normalize(records)
+#             df['ts'] = ts
+#             all_frames.append(df)
+
+#             # --- actualizar y reportar progreso ---
+#             prev_total = total_records
+#             total_records += len(df)
+#             if total_records - last_reported >= report_every:
+#                 print(f"[{dt.now().strftime('%H:%M:%S')}] "
+#                       f"Procesados {total_records:,} registros "
+#                       f"(último archivo: {date_str} {ts_str})")
+#                 last_reported = total_records
+
+#             # --- flush periódico a disco para liberar RAM ---
+#             if total_records // flush_every > prev_total // flush_every:
+#                 print(f"  -> Volcando a disco (chunk {chunk_idx}), liberando memoria...")
+#                 flush_to_disk()
+
+#         current_date += timedelta(days=1)
+
+#     # flush final de lo que haya quedado pendiente
+#     flush_to_disk()
+
+#     print(f"Total final: {total_records:,} registros procesados en {len(parquet_files)} chunks.")
+
+#     if not parquet_files:
+#         return pd.DataFrame() if not use_dask else dd.from_pandas(pd.DataFrame(), npartitions=1)
+
+#     if use_dask:
+#         result = dd.read_parquet(parquet_files)
+#     else:
+#         result = pd.concat([pd.read_parquet(p) for p in parquet_files], ignore_index=True)
+
+#     return result
+
+
+def line_to_wkt(line):
+    """Convert a Waze 'line' field (list of {'x','y'} points) to a WKT LINESTRING."""
+    if not isinstance(line, list) or len(line) < 2:
+        return None
+    try:
+        coords = ", ".join(f"{p['x']} {p['y']}" for p in line)
+    except (KeyError, TypeError):
+        return None
+    return f"LINESTRING ({coords})"
+
+    
 def load_feed_json(s3_path, start, end, data_type='jams',
-                   profile_name=None, use_dask=True, filter_level_5=True):
-    '''
-    Read Waze Feed JSON files from S3 and aggregate them into a single DataFrame.
-
-    The function reads gzipped JSON files stored in an S3 bucket organized by date
-    folders (e.g., s3://bucket/feed/UY/city/2026-06-25/2026-06-25-18-02-00.json.gz).
-    It extracts the query timestamp from the file name and adds it as a `ts` column.
-
-    Parameters:
-    - s3_path (str): S3 path to the feed folder (e.g., 's3://wbg-waze/feed/UY/784montevideo').
-    - start (str): Start date in 'YYYY-MM-DD' format (inclusive).
-    - end (str): End date in 'YYYY-MM-DD' format (inclusive).
-    - data_type (str, optional): Type of data to extract from the JSON files.
-        One of 'jams' or 'alerts'. Defaults to 'jams'.
-    - profile_name (str, optional): AWS profile name for authentication.
-        If None, uses default credentials.
-    - use_dask (bool, optional): If True, returns a Dask DataFrame.
-        If False, returns a Pandas DataFrame. Defaults to True.
-    - filter_level_5 (bool, optional): If True, removes jams with level 5 
-        (road closures). Defaults to True.
-
-    Returns:
-    - DataFrame: A Pandas or Dask DataFrame with the aggregated feed data
-        and a `ts` column indicating the query timestamp.
-    '''
+                    profile_name=None, use_dask=True, filter_level_5=True):
+    """
+    Load Waze feed jams/alerts from gzipped JSON files in S3, organized by.
+    Adds 'ts' and 'geoWKT' columns.
+    """
     s3_path = s3_path.rstrip('/')
 
     if profile_name:
-        import boto3
         session = boto3.Session(profile_name=profile_name)
         credentials = session.get_credentials().get_frozen_credentials()
         fs = s3fs.S3FileSystem(
             key=credentials.access_key,
             secret=credentials.secret_key,
-            token=credentials.token,
-        )
+            token=credentials.token)
     else:
         fs = s3fs.S3FileSystem()
 
-    start_date = dt.strptime(start, '%Y-%m-%d').date()
-    end_date = dt.strptime(end, '%Y-%m-%d').date()
-
-    # Strip s3:// prefix for s3fs operations
-    bucket_path = s3_path.replace('s3://', '')
+    start_date = dt.strptime(start, "%Y-%m-%d").date()
+    end_date = dt.strptime(end, "%Y-%m-%d").date()
+    prefix = s3_path.replace("s3://", "")
 
     all_frames = []
+    total_records = 0
+    last_reported = 0
+    report_every = 100_000
+
     current_date = start_date
     while current_date <= end_date:
-        date_str = current_date.strftime('%Y-%m-%d')
-        date_folder = f"{bucket_path}/{date_str}/"
-
+        date_str = current_date.strftime("%Y-%m-%d")
         try:
-            files = fs.ls(date_folder)
+            files = fs.ls(f"{prefix}/{date_str}/")
         except FileNotFoundError:
             current_date += timedelta(days=1)
             continue
 
-        json_files = [f for f in files if f.endswith('.json.gz')]
-
-        for file_path in json_files:
-            file_name = file_path.split('/')[-1]
-            # Extract timestamp from filename: 2026-06-25-18-02-00.json.gz
-            ts_str = file_name.replace('.json.gz', '')
-            ts = dt.strptime(ts_str, '%Y-%m-%d-%H-%M-%S')
+        for file_path in (f for f in files if f.endswith(".json.gz")):
+            ts_str = file_path.split("/")[-1].replace(".json.gz", "")
+            ts = dt.strptime(ts_str, "%Y-%m-%d-%H-%M-%S")
 
             try:
-                with fs.open(file_path, 'rb') as f:
-                    with gzip.open(f, 'rt', encoding='utf-8') as gz:
-                        data = json.load(gz)
+                with fs.open(file_path, "rb") as f, gzip.open(f, "rt", encoding="utf-8") as gz:
+                    data = json.load(gz)
             except (json.JSONDecodeError, gzip.BadGzipFile, EOFError):
                 continue
 
@@ -733,21 +858,27 @@ def load_feed_json(s3_path, start, end, data_type='jams',
                 continue
 
             df = pd.json_normalize(records)
-            df['ts'] = ts
+            df["geoWKT"] = df["line"].apply(line_to_wkt)
+            df["ts"] = ts
             all_frames.append(df)
+
+            total_records += len(df)
+            if total_records - last_reported >= report_every:
+                print(f"[{dt.now():%H:%M:%S}] Processed {total_records:,} records "
+                      f"(last file: {date_str} {ts_str})")
+                last_reported = total_records
 
         current_date += timedelta(days=1)
 
+    print(f"Total processed: {total_records:,} records.")
+
     if not all_frames:
-        return pd.DataFrame() if not use_dask else dd.from_pandas(pd.DataFrame(), npartitions=1)
+        empty = pd.DataFrame()
+        return dd.from_pandas(empty, npartitions=1) if use_dask else empty
 
     result = pd.concat(all_frames, ignore_index=True)
-
-    if filter_level_5 and 'level' in result.columns:
-        result = result[result['level'] != 5]
-
+    if filter_level_5 and "level" in result.columns:
+        result = result[result["level"] != 5]
     if use_dask:
         result = dd.from_pandas(result, npartitions=max(1, len(all_frames) // 50))
-
     return result
-
