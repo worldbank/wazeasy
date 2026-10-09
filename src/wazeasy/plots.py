@@ -10,6 +10,8 @@ import pandas as pd
 from shapely.geometry import MultiPolygon, Polygon
 
 from wazeasy import utils
+import contextily as cx
+
 
 attaviz.enable(size="large")
 alt.data_transformers.disable_max_rows()
@@ -366,7 +368,7 @@ def plot_tci_daily_spatial(
     return chart
 
 
-def hourly_tci_by_month(df, dow, group_name, start_date=None, end_date=None):
+def hourly_tci_by_month(df, dow, group_name, agg_column = 'length', start_date=None, end_date=None):
     """
     Plot the hourly Traffic Congestion Index (TCI) for selected months.
 
@@ -374,6 +376,7 @@ def hourly_tci_by_month(df, dow, group_name, start_date=None, end_date=None):
     - df (DataFrame): Dask/Pandas DataFrame containing traffic data.
     - dow (list): Days of the week to include (e.g. [0, 1, 2, 3, 4] for weekdays).
     - group_name (str): Label used in the plot title (e.g. region name).
+    - agg_column (str): Name of column used for aggregation.
     - start_date (str, optional): Period start date (YYYY-MM-DD). Defaults to the data minimum.
     - end_date (str, optional): Period end date (YYYY-MM-DD). Defaults to the data maximum.
 
@@ -381,7 +384,7 @@ def hourly_tci_by_month(df, dow, group_name, start_date=None, end_date=None):
     - alt.Chart: Altair line chart, one line per (year, month).
     """
     monthly = utils.monthly_hourly_tci(
-        df, "length", start_date=start_date, end_date=end_date, dow=dow
+        df, agg_column, start_date=start_date, end_date=end_date, dow=dow
     ).reset_index()
     monthly["year_month"] = monthly["year_month"].astype(str)
 
@@ -681,44 +684,22 @@ def plot_year_to_year_tci(df, agg_column, start_date=None, end_date=None, dow=No
     return chart
 
 
-def map_tci(
-    df, agg_spatial, agg_column, layer, start_date=None, end_date=None, dow=None
-):
+def map_tci(layer, column, label):
     """
     Render an interactive Folium choropleth of mean daily TCI by spatial unit.
 
-    Useful for exploring results — pan, zoom, and inspect individual polygons.
-    For a report-ready static-style figure with attaviz styling and a basemap
-    overlay, see :func:`map_tci_static`.
-
     Parameters:
-    - df (DataFrame): Dask/Pandas DataFrame containing traffic data.
-    - agg_spatial (str): Spatial aggregation column.
-    - agg_column (str): Column used in TCI computation.
-    - layer (GeoDataFrame): Polygons with a 'Region' column.
-    - start_date, end_date, dow: optional time filters.
+    - layer (GeoDataFrame): Polygons with the TCI column
+    - column, label (string): Name/label of column to plot
 
     Returns:
     - folium.Map: Interactive Leaflet-based map produced by ``GeoDataFrame.explore``.
     """
-    layer = layer.copy()
-    layer.set_index("Region", inplace=True)
-    layer["TCI"] = utils.mean_daily_tci_geog(
-        df,
-        agg_spatial,
-        agg_column,
-        layer,
-        start_date=start_date,
-        end_date=end_date,
-        dow=dow,
-    )
-    layer = layer[layer["TCI"] > 0]
     layer.reset_index(inplace=True)
     return layer.explore(
-        column="TCI",
-        cmap="Spectral_r",
-        tiles="CartoDB Positron",
-        legend_kwds={"label": "TCI by Region", "orientation": "horizontal"},
+        column=column,
+        cmap="viridis_r",
+        legend_kwds={"label": label, "orientation": "horizontal"},
     )
 
 
@@ -787,8 +768,7 @@ def map_tci_static(
     - alt.LayerChart: Basemap tiles + attaviz SEQ_RED choropleth + attribution.
     """
     layer = layer.copy()
-    if "Region" in layer.columns:
-        layer = layer.set_index("Region")
+    layer = layer.set_index(agg_spatial)
     tci_series = utils.mean_daily_tci_geog(
         df,
         agg_spatial,
@@ -805,16 +785,16 @@ def map_tci_static(
         layer = layer.to_crs(epsg=4326)
 
     tci_table = pd.DataFrame(
-        {"Region": tci_series.index.astype(str), "TCI": tci_series.values}
+        {agg_spatial: tci_series.index.astype(str), "TCI": tci_series.values}
     )
     tci_table["has_data"] = tci_table["TCI"].notna() & (tci_table["TCI"] > 0)
 
     if not show_no_data_regions:
-        regions_with_data = set(tci_table.loc[tci_table["has_data"], "Region"])
-        layer = layer[layer["Region"].astype(str).isin(regions_with_data)]
+        regions_with_data = set(tci_table.loc[tci_table["has_data"], agg_spatial])
+        layer = layer[layer[agg_spatial].astype(str).isin(regions_with_data)]
 
     layer = layer.assign(geometry=layer.geometry.apply(_ensure_d3_winding))
-    geojson = json.loads(layer[["Region", "geometry"]].to_json())
+    geojson = json.loads(layer[[agg_spatial, "geometry"]].to_json())
     geo_data = alt.Data(values=geojson, format=alt.DataFormat(property="features"))
 
     select = alt.selection_point(
@@ -837,14 +817,14 @@ def map_tci_static(
         .mark_geoshape(strokeCap="round", strokeJoin="round", fillOpacity=0.7)
         .transform_lookup(
             lookup="properties.Region",
-            from_=alt.LookupData(tci_table, "Region", ["TCI", "has_data"]),
+            from_=alt.LookupData(tci_table, agg_data, ["TCI", "has_data"]),
         )
         .encode(
             color=color,
             stroke=stroke,
             strokeWidth=stroke_width,
             tooltip=[
-                alt.Tooltip("properties.Region:N", title="Region"),
+                alt.Tooltip("properties.Region:N", title=agg_data),
                 alt.Tooltip("TCI:Q", title="TCI", format=",.2f"),
             ],
         )
