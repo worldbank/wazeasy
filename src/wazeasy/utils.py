@@ -167,6 +167,7 @@ def tci_temporal_spatial(df, agg_temporal, agg_spatial, agg_column,
     dates_of_interest = define_dates_of_interest(df, start_date, end_date, dow)
     df_filtered = df[df['date'].isin(dates_of_interest)].copy()
     if is_dask_dataframe(df_filtered):
+        # import pdb; pdb.set_trace()
         tci = df_filtered.groupby(agg_temporal + [agg_spatial])[[agg_column]].sum().compute()  
     else:
         tci = df_filtered.groupby(agg_temporal + [agg_spatial])[[agg_column]].sum()
@@ -452,18 +453,18 @@ def assign_geography_to_jams(df, geog_info = None):
     - None: Modifies the DataFrame in place.
     '''
     df['region'] = 'region'
-
-    if geog_info is not None:
-        if is_dask_dataframe(df):
-            for region_name, gdf_area in geog_info.items():
-                unique_jams_over_agg_geom = parallelized_sjoin(df, gdf_area[['Region', 'geometry']])
+    if is_dask_dataframe(df):
+        if geog_info:
+            for geog, geog_data in geog_info.items():
+                agg_spatial = geog_data['agg_spatial']
+                gdf_area = gpd.read_file(geog_data["path"])
+                unique_jams_over_agg_geom = parallelized_sjoin(df, gdf_area[[agg_spatial, 'geometry']])
                 unique_jams_ddf = dd.from_pandas(unique_jams_over_agg_geom)
-                df = df.merge(unique_jams_ddf[['geoWKT', 'Region']], left_on = 'geoWKT', right_on = 'geoWKT', how = 'left')
-                df = df.rename(columns = {'Region': region_name})
+                df = df.merge(unique_jams_ddf[['geoWKT', agg_spatial]], left_on = 'geoWKT', right_on = 'geoWKT', how = 'left')
                 # import pdb; pdb.set_trace()
             return df
-        
-            # TODO: make this process for pandas dataframes/
+    
+        # TODO: make this process for pandas dataframes/
     return df
 
 def process_geowkt_partition(partition):
@@ -651,3 +652,30 @@ def obtain_hexagons_for_area(area, resolution):
 #     table['city'] = table['city'].apply(lambda x: remove_last_comma(x))
 #     table.set_index('city', inplace=True)
 
+def add_mean_daily_tci_to_vector_layer(df, agg_spatial, agg_column, layer, start_date=None, end_date=None, dow=None):
+    """
+    Calculate TCI for each geography on a vector layer
+
+    Parameters:
+    - df (DataFrame): Dask/Pandas DataFrame containing traffic data.
+    - agg_spatial (str): Spatial aggregation column.
+    - agg_column (str): Column used in TCI computation.
+    - layer (GeoDataFrame): Polygons with a 'Region' column.
+    - start_date, end_date, dow: optional time filters.
+
+    Returns:
+    - folium.Map: Interactive Leaflet-based map produced by ``GeoDataFrame.explore``.
+    """
+    layer = layer.copy()
+    layer.set_index(agg_spatial, inplace=True)
+    layer["TCI"] = mean_daily_tci_geog(
+                                        df,
+                                        agg_spatial,
+                                        agg_column,
+                                        layer,
+                                        start_date=start_date,
+                                        end_date=end_date,
+                                        dow=dow,
+                                    )
+    layer = layer[layer["TCI"] > 0]
+    return layer
